@@ -39,14 +39,13 @@ Goal: Route any engineering verification request to the right VeriHunt suite ski
    ```text
    python "<VP>" route --root . --s "$S" --prompt "<user_prompt>"
    ```
-2. Inspect `PLAN`, `REORDERED`, `SEC_RISK`, `BUDGET_GATE`, `TARGET_SCOPE`, and `CURRENT_SKILL_MD`:
+2. Inspect `PLAN`, `REORDERED`, `SEC_RISK`, `BUDGET_GATE`, `TARGET_SCOPE`, `CURRENT_SKILL_MD`, and `NEXT_TARGET_ROOT`:
    - **1–2 skills (`BUDGET_GATE=AUTO_PROCEED`):** Proceed straight to Phase 2.
    - **> 2 skills (`BUDGET_GATE=CONFIRM_OVER_2_SKILLS`):** Present the short causal plan (`PLAN`, why reordered/triggered, target scope) to the user before proceeding unless the user explicitly requested all skills in one run.
 
 ## Phase 2 — Stage Execution via Lazy Load
-1. Call `read_file` on **ONLY** `CURRENT_SKILL_MD` (for the active stage only).
-2. Execute that skill's Dual-Gate workflow targeting `S/overlay/` and narrowed `TARGET_SCOPE`:
-   - Pass `--root "$OVERLAY"` to the stage's CLI (`vpr.py`, `bh.py`, `vs.py`, or `vp.py`).
+1. Call `read_file` on **ONLY** `CURRENT_SKILL_MD` (or `NEXT_SKILL_MD` from `handoff`).
+2. Execute that skill's Dual-Gate workflow strictly against **`NEXT_TARGET_ROOT` (`S/overlay/`, NEVER raw host root)** using `NEXT_STAGE_ARGS` (`--root "$NEXT_TARGET_ROOT"`) and narrowed `TARGET_SCOPE`:
    - Collect the stage's verified patch (`--patch`) or modified workspace (`--from-dir`), finding count, test count, and status (`PASS` | `HARNESS_BROKEN` | `ENV_BROKEN`).
 
 ## Phase 3 — Overlay Handoff & Circuit Check
@@ -56,7 +55,7 @@ Goal: Route any engineering verification request to the right VeriHunt suite ski
    ```
 2. Branch strictly on `vpilot.py handoff` output:
    - **`CIRCUIT_BREAKER=TRIPPED`:** Stop immediately! Report `REASON`, failing command/harness symptom, and ask the user how to fix the environment or narrow scope.
-   - **`NEXT_SKILL!=NONE`:** Loop back to **Phase 2**, lazy-loading **ONLY** `NEXT_SKILL_MD`.
+   - **`NEXT_SKILL!=NONE`:** Loop back to **Phase 2**, lazy-loading **ONLY** `NEXT_SKILL_MD` and targeting **`NEXT_TARGET_ROOT`** (`NEXT_STAGE_ARGS`).
    - **`NEXT_SKILL=NONE`:** Proceed to **Phase 4**.
 
 ## Phase 4 — Unified Patch & Executive Summary

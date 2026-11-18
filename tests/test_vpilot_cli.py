@@ -189,6 +189,9 @@ class VeriPilotCliTestSuite(unittest.TestCase):
         self.assertEqual(kv["SEC_RISK"], "HIGH")
         self.assertEqual(kv["AUTO_SEC"], "True")
         self.assertEqual(kv["BUDGET_GATE"], "AUTO_PROCEED")
+        expected_overlay = str((s_dir / "overlay").resolve())
+        self.assertEqual(kv["NEXT_TARGET_ROOT"], expected_overlay)
+        self.assertEqual(kv["NEXT_STAGE_ARGS"], f'--root "{expected_overlay}"')
 
     def test_04_route_causal_reordering_enforced(self) -> None:
         repo = self.tmp / "repo4"
@@ -216,14 +219,21 @@ class VeriPilotCliTestSuite(unittest.TestCase):
         p1 = s_dir / "tmp" / "s1.patch"
         p1.write_text(_make_patch("pay.py", orig, step1), encoding="utf-8")
         h1 = _run_cli(["handoff", "--s", str(s_dir), "--skill", "veripr", "--patch", str(p1), "--findings", "1"])
-        self.assertEqual(_kv(h1.stdout)["NEXT_SKILL"], "verisec")
+        kv_h1 = _kv(h1.stdout)
+        self.assertEqual(kv_h1["NEXT_SKILL"], "verisec")
+        expected_overlay = str((s_dir / "overlay").resolve())
+        self.assertEqual(kv_h1["NEXT_TARGET_ROOT"], expected_overlay)
+        self.assertEqual(kv_h1["NEXT_STAGE_ARGS"], f'--root "{expected_overlay}"')
         self.assertIn("return 0.0", (s_dir / "overlay" / "pay.py").read_text(encoding="utf-8"))
 
         step2 = "def fee(x):\n    return 0.0\n\ndef refund(owner, req):\n    return owner == req\n"
         p2 = s_dir / "tmp" / "s2.patch"
         p2.write_text(_make_patch("pay.py", step1, step2), encoding="utf-8")
         h2 = _run_cli(["handoff", "--s", str(s_dir), "--skill", "verisec", "--patch", str(p2), "--findings", "1"])
-        self.assertEqual(_kv(h2.stdout)["NEXT_SKILL"], "NONE")
+        kv_h2 = _kv(h2.stdout)
+        self.assertEqual(kv_h2["NEXT_SKILL"], "NONE")
+        self.assertEqual(kv_h2["NEXT_TARGET_ROOT"], "NONE")
+        self.assertEqual(kv_h2["NEXT_STAGE_ARGS"], "NONE")
         final_overlay = (s_dir / "overlay" / "pay.py").read_text(encoding="utf-8")
         self.assertIn("return 0.0", final_overlay)
         self.assertIn("owner == req", final_overlay)
@@ -346,6 +356,31 @@ class VeriPilotCliTestSuite(unittest.TestCase):
         self.assertEqual(p_doc_bad.returncode, 1)
         self.assertIn("DOCTOR_STATUS=DEGRADED", p_doc_bad.stdout)
         self.assertIn("SKILL_VERISEC=MISSING", p_doc_bad.stdout)
+
+        # Verify --latest resolves highest semver tag (v1.10.0 > v1.2.0 > v1.0.0) via local Git bare repo
+        src_repo = self.tmp / "src_veripr"
+        _init_git_repo(src_repo, {"SKILL.md": "# v1.0.0\n", "scripts/vpr.py": "print('1.0.0')\n"})
+        _run_git(src_repo, ["tag", "v1.0.0"])
+        (src_repo / "SKILL.md").write_text("# v1.2.0\n", encoding="utf-8")
+        _run_git(src_repo, ["add", "."])
+        _run_git(src_repo, ["commit", "-m", "v1.2.0"])
+        _run_git(src_repo, ["tag", "v1.2.0"])
+        (src_repo / "SKILL.md").write_text("# v1.10.0\n", encoding="utf-8")
+        _run_git(src_repo, ["add", "."])
+        _run_git(src_repo, ["commit", "-m", "v1.10.0"])
+        _run_git(src_repo, ["tag", "v1.10.0"])
+
+        latest_dest = self.tmp / "latest_install"
+        p_latest = _run_cli([
+            "install", "--platform", "antigravity",
+            "--target-dir", str(latest_dest),
+            "--skills", "veripr",
+            "--latest",
+            "--repo-override", f"veripr={src_repo.as_uri()}",
+        ])
+        self.assertIn("VERSION_POLICY=LATEST", p_latest.stdout)
+        self.assertIn("veripr@v1.10.0", p_latest.stdout)
+        self.assertIn("# v1.10.0", (latest_dest / "veripr" / "SKILL.md").read_text(encoding="utf-8"))
 
     def test_12_stdout_12_line_cap_and_skill_md_budget(self) -> None:
         skill_lines = SKILL_MD.read_text(encoding="utf-8").splitlines()

@@ -39,12 +39,12 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 
-VPILOT_VERSION = "1.0.0"
+VPILOT_VERSION = "1.0.1"
 
 SUITE_REGISTRY: Dict[str, Dict[str, str]] = {
     "veripilot": {
         "repo": "https://github.com/lufus4826-eng/veripilot.git",
-        "tag": "v1.0.0",
+        "tag": "v1.0.1",
         "cli": "scripts/vpilot.py",
         "role": "orchestrator",
     },
@@ -959,6 +959,7 @@ def cmd_route(args: argparse.Namespace) -> int:
     first_skill = causal_plan[0]
     first_skill_md = skills_map.get(first_skill, {}).get("skill_md", "")
     target_scope = ",".join(touched_files[:12]) if touched_files else "."
+    next_target_root = str((Path(args.s).resolve() / "overlay")) if args.s else str(root)
 
     route_payload: Dict[str, Any] = {
         "prompt": prompt,
@@ -972,6 +973,7 @@ def cmd_route(args: argparse.Namespace) -> int:
         "risk_scan": risk_info,
         "sec_auto_added": sec_auto_added,
         "target_scope": touched_files if touched_files else ["."],
+        "overlay_root": next_target_root,
     }
 
     route_json_path = ""
@@ -1004,6 +1006,8 @@ def cmd_route(args: argparse.Namespace) -> int:
             f"TARGET_SCOPE={_trunc(target_scope, 100)}",
             f"CURRENT_SKILL={first_skill}",
             f"CURRENT_SKILL_MD={first_skill_md or 'NOT_INSTALLED'}",
+            f"NEXT_TARGET_ROOT={next_target_root}",
+            f"NEXT_STAGE_ARGS=--root \"{next_target_root}\"",
             f"ROUTE_JSON={route_json_path or 'memory'}",
         ]
     )
@@ -1109,6 +1113,8 @@ def cmd_handoff(args: argparse.Namespace) -> int:
                 f"DETAIL={_trunc(detail, 110)}",
                 "NEXT_SKILL=NONE",
                 "NEXT_SKILL_MD=NONE",
+                "NEXT_TARGET_ROOT=NONE",
+                "NEXT_STAGE_ARGS=NONE",
                 f"OVERLAY={overlay_dir}",
             ]
         )
@@ -1166,6 +1172,9 @@ def cmd_handoff(args: argparse.Namespace) -> int:
         [f"Stage {stage_num} ({skill}) status={args.status} findings={args.findings} tests={args.tests_ran} files={','.join(stage_modified) or 'none'}"],
     )
 
+    next_target_root = str(overlay_dir) if next_skill != "NONE" else "NONE"
+    next_stage_args = f'--root "{overlay_dir}"' if next_skill != "NONE" else "NONE"
+
     _emit_lines(
         [
             "HANDOFF_STATUS=OK",
@@ -1174,9 +1183,11 @@ def cmd_handoff(args: argparse.Namespace) -> int:
             f"STAGE_PATCH={stage_patch_path}",
             f"FILES_UPDATED={','.join(stage_modified) or 'none'}",
             f"CHECKPOINT={ckpt_dir}",
-            f"OVERLAY={overlay_dir}",
             f"NEXT_SKILL={next_skill}",
             f"NEXT_SKILL_MD={next_skill_md or 'NOT_INSTALLED'}",
+            f"NEXT_TARGET_ROOT={next_target_root}",
+            f"NEXT_STAGE_ARGS={next_stage_args}",
+            f"OVERLAY={overlay_dir}",
             f"REMAINING={','.join(plan[next_idx:]) or 'none'}",
         ]
     )
@@ -1313,6 +1324,41 @@ def _copy_skill_offline(src: Path, dst: Path) -> None:
     )
 
 
+_SEMVER_TAG_RE = re.compile(r"^refs/tags/v(\d+)\.(\d+)\.(\d+)$")
+
+
+def _resolve_latest_remote_tag(repo_url: str, fallback_tag: str) -> str:
+    if not shutil.which("git"):
+        return fallback_tag
+    try:
+        proc = subprocess.run(
+            ["git", "ls-remote", "--tags", "--refs", repo_url],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=20,
+        )
+        if proc.returncode != 0:
+            return fallback_tag
+    except (OSError, subprocess.SubprocessError):
+        return fallback_tag
+
+    best: Optional[Tuple[Tuple[int, int, int], str]] = None
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split()
+        if len(parts) < 2:
+            continue
+        m = _SEMVER_TAG_RE.match(parts[1])
+        if not m:
+            continue
+        ver = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        tag_name = f"v{ver[0]}.{ver[1]}.{ver[2]}"
+        if best is None or ver > best[0]:
+            best = (ver, tag_name)
+    return best[1] if best else fallback_tag
+
+
 def _install_skill_online(repo_url: str, tag: str, dst: Path) -> None:
     if not shutil.which("git"):
         raise RuntimeError("git CLI is required for online install")
@@ -1362,6 +1408,24 @@ def cmd_install(args: argparse.Namespace) -> int:
     target_roots = _resolve_platform_targets(platforms, args.target_dir, args.home_dir, args.project_dir)
     offline_dir = Path(args.offline_from).expanduser().resolve() if args.offline_from else None
     mode = "OFFLINE" if offline_dir else "ONLINE"
+    use_latest = bool(getattr(args, "latest", False))
+    source_overrides: Dict[str, str] = {}
+    if getattr(args, "repo_override", None):
+        for pair in args.repo_override:
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                source_overrides[k.strip().lower()] = v.strip()
+
+    resolved_tags: Dict[str, str] = {}
+    for sk in skills_req:
+        meta = SUITE_REGISTRY[sk]
+        repo_url = source_overrides.get(sk, meta["repo"])
+        if offline_dir:
+            resolved_tags[sk] = "local-latest" if use_latest else meta["tag"]
+        elif use_latest:
+            resolved_tags[sk] = _resolve_latest_remote_tag(repo_url, meta["tag"])
+        else:
+            resolved_tags[sk] = meta["tag"]
 
     results: List[str] = []
     errors: List[str] = []
@@ -1369,6 +1433,8 @@ def cmd_install(args: argparse.Namespace) -> int:
         ok_count = 0
         for sk in skills_req:
             meta = SUITE_REGISTRY[sk]
+            repo_url = source_overrides.get(sk, meta["repo"])
+            tag = resolved_tags[sk]
             dst = dest_root / sk
             try:
                 if offline_dir:
@@ -1379,16 +1445,17 @@ def cmd_install(args: argparse.Namespace) -> int:
                         raise FileNotFoundError(f"Offline source missing: {cand}")
                     _copy_skill_offline(cand, dst)
                 else:
-                    _install_skill_online(meta["repo"], meta["tag"], dst)
+                    _install_skill_online(repo_url, tag, dst)
                 ok_count += 1
             except Exception as exc:
                 errors.append(f"{plat}/{sk}:{_trunc(str(exc), 60)}")
         results.append(f"{plat}:{ok_count}/{len(skills_req)}->{dest_root}")
 
-    pins = ",".join(f"{sk}@{SUITE_REGISTRY[sk]['tag']}" for sk in skills_req)
+    pins = ",".join(f"{sk}@{resolved_tags[sk]}" for sk in skills_req)
+    policy = "LATEST" if use_latest else "PINNED"
     out = [
-        f"INSTALL_STATUS={'OK' if not errors else 'PARTIAL_ERROR'} MODE={mode}",
-        f"SKILLS_PINNED={pins}",
+        f"INSTALL_STATUS={'OK' if not errors else 'PARTIAL_ERROR'} MODE={mode} VERSION_POLICY={policy}",
+        f"SKILLS_RESOLVED={pins}",
         *results[:8],
     ]
     if errors:
@@ -1522,6 +1589,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp_inst.add_argument("--project-dir", default=None, help="Override project directory for project-local platform paths")
     sp_inst.add_argument("--offline-from", default=None, help="Copy skills locally instead of cloning from GitHub")
     sp_inst.add_argument("--skills", default=None, help="Comma-separated subset of skills (default: all 5)")
+    sp_inst.add_argument("--latest", action="store_true", help="Resolve latest semver tag (vX.Y.Z) instead of pinned release tags")
+    sp_inst.add_argument("--repo-override", action="append", default=[], help="Override skill=git_url (primarily for testing)")
 
     sp_doc = sub.add_parser("doctor", help="Check Python, Git, 5 skill engines, exclude rules & temp cleanliness")
     sp_doc.add_argument("--root", default=".", help="Target repository root")

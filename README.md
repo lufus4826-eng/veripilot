@@ -1,16 +1,16 @@
-# VeriPilot 🧭⚡
+# VeriPilot (VeriHunt Suite) 🧭⚡
 
 [![Agent Skills Standard](https://img.shields.io/badge/Agent%20Skills-Compliant-blue.svg)](https://agentskills.io)
 [![CI](https://github.com/lufus4826-eng/veripilot/actions/workflows/ci.yml/badge.svg)](https://github.com/lufus4826-eng/veripilot/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/Version-1.0.0-purple.svg)](https://github.com/lufus4826-eng/veripilot/releases/tag/v1.0.0)
+[![Version](https://img.shields.io/badge/Version-1.0.1-purple.svg)](https://github.com/lufus4826-eng/veripilot/releases/tag/v1.0.1)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/Platforms-6%20Agent%20Runtimes-green.svg)](#one-command-suite-installation)
 [![OS](https://img.shields.io/badge/OS-Windows%20%7C%20macOS%20%7C%20Linux-orange.svg)](#prerequisites)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Python%203%20Stdlib%20Only-teal.svg)](#prerequisites)
 [![VeriHunt Ecosystem](https://img.shields.io/badge/Ecosystem-VeriHunt-indigo.svg)](https://github.com/lufus4826-eng/verihunt)
 
-> **VeriPilot — Smart Router, Cumulative Overlay Orchestrator & One-Command Installer for the VeriHunt Ecosystem.**  
-> Stops users from guessing which verification skill to invoke (`/veripr`, `/verihunt`, `/verisec`, `/veriperf`), prevents AI context explosion via **Just-in-Time Skill Loading**, chains multi-stage fixes over a **Cumulative Overlay Workspace** (`S/overlay/`) without patch collisions, enforces **Causal Execution Order**, trips a **Circuit Breaker** immediately on broken test harnesses, and installs the entire 5-skill suite across 6 agent platforms in one command.
+> **VeriPilot (VeriHunt Suite) — AI Coding Agent Skills Orchestrator, Smart Router, Cumulative Overlay Engine & One-Command Suite Installer.**  
+> Stops users from guessing which verification skill to invoke (`/veripr`, `/verihunt`, `/verisec`, `/veriperf`), prevents AI context explosion via **Just-in-Time Skill Loading**, chains multi-stage fixes over a **Cumulative Overlay Workspace** (`S/overlay/`, enforced via `NEXT_TARGET_ROOT` & `NEXT_STAGE_ARGS`) without patch collisions, enforces **Causal Execution Order**, trips a **Circuit Breaker** immediately on broken test harnesses, and installs the entire 5-skill suite across 6 agent platforms in one command.
 
 ---
 
@@ -22,7 +22,7 @@ As the VeriHunt Ecosystem grew into four specialized verification engines (**Ver
 3. **Wrong Execution Order & Patch Conflicts:** Tuning speed before fixing bugs or adding authorization checks wastes effort and produces colliding `.patch` files against the raw baseline.
 4. **Fragmented Installation:** Installing and checking 5 separate repositories across Claude Code, Antigravity/Gemini CLI, Cursor, Windsurf, Roo Code, and Cline took repetitive cloning and path setup.
 
-**VeriPilot (`v1.0.0`) enforces 4 Iron Engineering Laws inside `scripts/vpilot.py` (Python 3 stdlib only; `<= 12` lines output per command):**
+**VeriPilot (`v1.0.1`) enforces 4 Iron Engineering Laws inside `scripts/vpilot.py` (Python 3 stdlib only; `<= 12` lines output per command):**
 1. **Just-in-Time Skill Loading:** `SKILL.md` (`< 120` lines) forbids preloading sibling skill manuals; the active stage's `SKILL.md` is opened only when that stage runs.
 2. **Causal Execution Order (`veripr -> verihunt -> verisec -> veriperf`):** Correctness always runs before Security, and Security always runs before Performance.
 3. **Cumulative Overlay Workspace (`S/overlay/`):** Stage $N+1$ verifies and patches on top of Stages $1..N$ inside `S/overlay/`, exporting a single conflict-free pure-LF unified patch (`S/patches/veripilot-unified.patch`) validated with `git apply --check`.
@@ -88,6 +88,9 @@ python scripts/vpilot.py install --platform all
 # Air-gapped / offline installation from a local folder
 python scripts/vpilot.py install --platform all --offline-from /path/to/local_skills_bundle
 
+# Optional: pull the latest vX.Y.Z release tag of each sibling skill instead of pinned versions
+python scripts/vpilot.py install --platform antigravity --latest
+
 # Verify Python, Git, and all 5 sibling skill engines
 python scripts/vpilot.py doctor
 ```
@@ -99,10 +102,10 @@ python scripts/vpilot.py doctor
 | Subcommand | Purpose |
 |---|---|
 | `init [--root .] [--skills-dir DIR]` | Creates `.bughunt/pilot-<ts>/{patches,logs,tmp,checkpoints,baseline,overlay}`, adds `.bughunt/` to `.git/info/exclude`, discovers sibling skills, snapshots `fs-before.txt`. |
-| `route [--root .] [--s S] --prompt "..."` | Runs 3-layer triage (TH/EN Intent + Git status/merge-base + touched-file risk scan), enforces Causal Order (`veripr -> verihunt -> verisec -> veriperf`), returns `CURRENT_SKILL_MD`. |
-| `handoff --s S --skill <name> [--patch P \| --from-dir D] [--check-cmd C]` | Checks Circuit Breaker (`HARNESS_BROKEN` / `ENV_BROKEN` / `BUDGET_EXCEEDED_2_SKILLS`), applies stage edits onto `S/overlay/`, saves stage patch & checkpoint, returns `NEXT_SKILL_MD`. |
+| `route [--root .] [--s S] --prompt "..."` | Runs 3-layer triage (TH/EN Intent + Git status/merge-base + touched-file risk scan), enforces Causal Order (`veripr -> verihunt -> verisec -> veriperf`), returns `CURRENT_SKILL_MD`, `NEXT_TARGET_ROOT`, and `NEXT_STAGE_ARGS`. |
+| `handoff --s S --skill <name> [--patch P \| --from-dir D] [--check-cmd C]` | Checks Circuit Breaker (`HARNESS_BROKEN` / `ENV_BROKEN` / `BUDGET_EXCEEDED_2_SKILLS`), applies stage edits onto `S/overlay/`, saves stage patch & checkpoint, returns `NEXT_SKILL_MD`, `NEXT_TARGET_ROOT`, and `NEXT_STAGE_ARGS`. |
 | `finalize --s S [--clean] [--verify-cmd C]` | Exports pure-LF `S/patches/veripilot-unified.patch`, runs `git apply --check --ignore-space-change --ignore-whitespace`, cleans temps, verifies host `cleanliness`. |
-| `install [--platform ...] [--offline-from DIR]` | Clones or updates all 5 pinned VeriHunt suite skills across 6 platforms (online via Git tags or offline copy). |
+| `install [--platform ...] [--offline-from DIR] [--latest]` | Clones or updates all 5 VeriHunt suite skills across 6 platforms (pinned release tags by default, or latest remote semver tags via `--latest`, or offline copy). |
 | `doctor [--root .] [--skills-dir DIR]` | Audits Python `>=3.9`, Git, all 5 `SKILL.md` & CLI scripts, `.git/info/exclude`, and stale `.bughunt/` overlays. |
 | `log --s S [--status ...] [--entry ...]` | Atomically updates `S/worklog.md`. |
 
@@ -112,7 +115,7 @@ python scripts/vpilot.py doctor
 
 | Skill | Role in Causal Chain | Repository | Pinned Release |
 |---|---|---|---|
-| **VeriPilot** | Smart Router, Cumulative Overlay Orchestrator & Suite Installer | [`lufus4826-eng/veripilot`](https://github.com/lufus4826-eng/veripilot) | `v1.0.0` |
+| **VeriPilot** | Smart Router, Cumulative Overlay Orchestrator & Suite Installer | [`lufus4826-eng/veripilot`](https://github.com/lufus4826-eng/veripilot) | `v1.0.1` |
 | **VeriPR** | Stage 1a: 1-hop caller ripple, Git worktree `Base` vs. `Head` & API schema drift | [`lufus4826-eng/veripr`](https://github.com/lufus4826-eng/veripr) | `v1.1.0` |
 | **VeriHunt** | Stage 1b: Deep correctness, edge-case & concurrency bug hunting | [`lufus4826-eng/verihunt`](https://github.com/lufus4826-eng/verihunt) | `v2.1.0` |
 | **VeriSec** | Stage 2: Business-logic & auth security (IDOR, Missing Auth, Mass Assignment, Double-Spend) | [`lufus4826-eng/verisec`](https://github.com/lufus4826-eng/verisec) | `v1.1.0` |
