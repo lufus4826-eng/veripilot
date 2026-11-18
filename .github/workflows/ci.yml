@@ -1,0 +1,41 @@
+name: VeriPilot CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Test & Demo (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure Git author for temporary demo repos
+        run: |
+          git config --global user.name "VeriPilot CI"
+          git config --global user.email "ci@verihunt.local"
+
+      - name: Verify CLI help & SKILL.md line budget
+        run: |
+          python -B scripts/vpilot.py --help
+          python -c "import pathlib; lines = pathlib.Path('SKILL.md').read_text(encoding='utf-8').splitlines(); assert len(lines) <= 120, f'SKILL.md too long: {len(lines)}'; print(f'SKILL.md lines={len(lines)} OK')"
+
+      - name: Run 12-suite unit & integration tests
+        run: python -B tests/test_vpilot_cli.py
+
+      - name: Run 1-command fintech_pilot_demo showcase
+        run: python -B examples/fintech_pilot_demo/run_demo.py
